@@ -433,15 +433,34 @@
   paintThemeBtn();
 
   /* ---------- install and offline ---------- */
-  // Chrome (Android and laptop) fires this when the app can be installed; we show our own Install button.
+  // The Install button shows whenever the app isn't already running installed. Chrome only sometimes offers a
+  // direct install (beforeinstallprompt), and iPhones never do, so otherwise the button explains how to do it by hand.
   var installEvent = null;
+  var installed = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  $('installBtn').hidden = installed;
   window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); installEvent = e; $('installBtn').hidden = false; });
+  function installSteps() {
+    var ua = navigator.userAgent;
+    if (/iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) {
+      return 'Open this page in Safari, tap the Share button (the square with an arrow), then tap Add to Home Screen.';
+    }
+    if (/Android/.test(ua)) {
+      return 'In Chrome, tap the ⋮ menu at the top right, then Install app (or Add to Home screen). If you opened this link from WhatsApp, first tap ⋮ → Open in Chrome.';
+    }
+    return 'In Chrome or Edge, click the install icon at the right end of the address bar, or open the browser menu and choose Install.';
+  }
   $('installBtn').addEventListener('click', function () {
-    if (!installEvent) return;
-    installEvent.prompt();
-    installEvent.userChoice.finally(function () { installEvent = null; $('installBtn').hidden = true; });
+    if (installEvent) {
+      try {
+        installEvent.prompt();
+        installEvent.userChoice.then(function (c) { if (c.outcome === 'accepted') $('installBtn').hidden = true; }).finally(function () { installEvent = null; });
+        return;
+      } catch (e) { installEvent = null; } // the browser refused the prompt: fall through to the instructions
+    }
+    $('installHelpTxt').textContent = installSteps(); $('installHelp').hidden = false; $('installHelpClose').focus();
   });
-  window.addEventListener('appinstalled', function () { $('installBtn').hidden = true; });
+  $('installHelpClose').addEventListener('click', function () { $('installHelp').hidden = true; });
+  window.addEventListener('appinstalled', function () { $('installBtn').hidden = true; $('installHelp').hidden = true; });
   // The service worker keeps a copy of the app on the device so it opens without internet.
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () {}); });
