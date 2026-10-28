@@ -16,7 +16,11 @@
   function today() { var d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
   var uid = 0;
   function newId() { uid += 1; return 'k' + Date.now().toString(36) + uid; }
-  function blankItem() { return { id: newId(), ref: '', desc: '', w: '', h: '', unit: 'mm', qty: '1', rate: '' }; }
+  // A glass item is one kind of glass (e.g. 10mm clear). It goes to one or more places (Bathroom, Kitchen…),
+  // and each place has one or more sizes, each with its own quantity and price.
+  function blankSize() { return { id: newId(), w: '', h: '', qty: '1', rate: '' }; }
+  function blankPlace() { return { id: newId(), ref: '', sizes: [blankSize()] }; }
+  function blankItem() { return { id: newId(), desc: '', unit: 'mm', places: [blankPlace()] }; }
   function blankAcc() { return { id: newId(), code: '', desc: '', qty: '1', per: 'pcs', rate: '' }; }
   // The reference number comes from a counter that only goes up, so two quotations never share a number.
   function refNo() { var n = load(CNT) || 1; return 'Q/' + String(n).padStart(4, '0') + '-' + String(new Date().getFullYear()).slice(2); }
@@ -30,8 +34,35 @@
   var biz = Object.assign({ name: DEFAULT_NAME, phone: '', wa: '', email: '', location: '', logo: '', terms: DEFAULT_TERMS }, load(BIZ) || {});
   // The company name is filled in from the start; a blank one saved earlier falls back to it too.
   if (!biz.name || biz.name === OLD_NAME) biz.name = DEFAULT_NAME;
-  var st = load(KEY) || blankState();
-  if (!st.items || !st.items.length) st.items = [blankItem()];
+  // Older quotations are brought up to date: the first version kept one size per glass item (same glass and unit
+  // are merged), the next kept a list of sizes each with its own place. Sizes for the same place are grouped.
+  function addToPlace(g, ref, z) {
+    var pl = g.places.find(function (x) { return x.ref === ref; });
+    if (!pl) { pl = { id: newId(), ref: ref, sizes: [] }; g.places.push(pl); }
+    pl.sizes.push({ id: newId(), w: z.w || '', h: z.h || '', qty: z.qty || '1', rate: z.rate || '' });
+  }
+  function fixGlass(s) {
+    var out = [];
+    (s.items || []).forEach(function (it) {
+      if (it.places) { out.push(it); return; }
+      var desc = it.desc || '', unit = it.unit || 'mm', g;
+      if (it.sizes) {
+        g = { id: it.id || newId(), desc: desc, unit: unit, places: [] }; out.push(g);
+        it.sizes.forEach(function (z) { addToPlace(g, z.ref || '', z); });
+        return;
+      }
+      g = out.find(function (x) { return x.desc === desc && x.unit === unit; });
+      if (!g) { g = { id: it.id || newId(), desc: desc, unit: unit, places: [] }; out.push(g); }
+      addToPlace(g, it.ref || '', it);
+    });
+    out.forEach(function (g) {
+      if (!g.places.length) g.places.push(blankPlace());
+      g.places.forEach(function (pl) { if (!pl.sizes.length) pl.sizes.push(blankSize()); });
+    });
+    s.items = out.length ? out : [blankItem()];
+    return s;
+  }
+  var st = fixGlass(load(KEY) || blankState());
   if (!st.accs) st.accs = [];
   var view = 'edit';
   var $ = function (id) { return document.getElementById(id); };
@@ -43,14 +74,16 @@
   function cedi(p) { return 'GH₵ ' + money(p); }
   function r2(x) { return Math.round(x * 100) / 100; }
   function qty(o) { var q = parseFloat(o.qty); return q > 0 ? q : 0; }
-  // Each glass item is priced from the owner's own estimate: price each × quantity. Sizes are for the client's information only.
-  function itemTotal(it) { return Math.round(pes(it.rate) * qty(it)); }
+  // Each glass size is priced from the owner's own estimate: price each × quantity. Sizes are for the client's information only.
+  function sizeTotal(z) { return Math.round(pes(z.rate) * qty(z)); }
+  function placeTotal(pl) { return sum(pl.sizes, sizeTotal); }
+  function itemTotal(g) { return sum(g.places, placeTotal); }
+  function usedSizes(pl) { return pl.sizes.filter(function (z) { return parseFloat(z.w) || parseFloat(z.h) || pes(z.rate); }); }
+  function usedPlaces(g) { return g.places.filter(function (pl) { return pl.ref || usedSizes(pl).length; }); }
   function lineTotal(o) { return Math.round(pes(o.rate) * qty(o)); }
   function fmtN(x) { return r2(x).toLocaleString('en-GH', { maximumFractionDigits: 2 }); }
-  function calcLine(it) {
-    return pes(it.rate) ? fmtN(qty(it)) + ' × ' + cedi(pes(it.rate)) : 'Enter the price';
-  }
-  function size(it) { return parseFloat(it.w) && parseFloat(it.h) ? it.w + ' × ' + it.h + ' ' + it.unit : ''; }
+  function calcLine(z) { return pes(z.rate) ? fmtN(qty(z)) + ' × ' + cedi(pes(z.rate)) : ''; }
+  function size(z, unit) { return parseFloat(z.w) && parseFloat(z.h) ? z.w + ' × ' + z.h + ' ' + unit : ''; }
   function sum(list, fn) { return list.reduce(function (s, x) { return s + fn(x); }, 0); }
   // Every total on screen, on the sheet and in WhatsApp comes from this one function.
   function totals() {
@@ -64,28 +97,120 @@
   function niceDate(s) { var d = new Date(s + 'T00:00:00'); return isNaN(d) ? '' : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }); }
   // Anything typed by the user is escaped before it goes into HTML, so a "<" in a name can't break the page.
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
-  function hasContent(s) { return !!(s.client.name || s.client.phone || s.items.some(function (i) { return i.desc || pes(i.rate); }) || s.accs.length); }
+  function hasContent(s) { return !!(s.client.name || s.client.phone || s.items.some(function (g) { return g.desc || itemTotal(g); }) || s.accs.length); }
 
-  /* ---------- cards ---------- */
-  // Each list (glass, accessories) is drawn as cards. Only the card being typed in is repainted,
+  /* ---------- glass: one card holding every glass item; each glass has places, each place has sizes ---------- */
+  // Only structural changes (adding or removing a glass, place or size) redraw the card; typing just repaints amounts,
   // so the keyboard never loses focus.
+  var UNITS = [['mm', 'mm'], ['cm', 'cm'], ['in', 'inches'], ['ft', 'feet']];
+  function sizeRow(pl, z, j) {
+    var p = 'g-' + z.id + '-';
+    return '<div class="size" data-zid="' + z.id + '">' +
+      '<label class="z-w" for="' + p + 'w"><span class="lbl">Width</span><input id="' + p + 'w" data-f="w" inputmode="decimal" placeholder="750"></label>' +
+      '<label class="z-h" for="' + p + 'h"><span class="lbl">Height</span><input id="' + p + 'h" data-f="h" inputmode="decimal" placeholder="2100"></label>' +
+      '<label class="z-qty" for="' + p + 'qty"><span class="lbl">Qty</span><input id="' + p + 'qty" data-f="qty" type="number" inputmode="numeric" min="1" step="1"></label>' +
+      '<label class="z-rate" for="' + p + 'rate"><span class="lbl">Price each (GH₵)</span><input id="' + p + 'rate" data-f="rate" inputmode="decimal" placeholder="0.00"></label>' +
+      '<span class="z-amt num" data-zamt></span>' +
+      (pl.sizes.length > 1 ? '<button type="button" class="x-btn z-del" data-act="del-size" aria-label="Remove size ' + (j + 1) + '">×</button>' : '') +
+      '</div>';
+  }
+  function placeBlock(g, pl, k) {
+    var p = 'g-' + pl.id + '-';
+    return '<div class="place" data-pid="' + pl.id + '">' +
+      '<div class="p-head"><label for="' + p + 'ref">Where it goes<input id="' + p + 'ref" data-f="ref" placeholder="Bathroom"></label>' +
+      (g.places.length > 1 ? '<button type="button" class="x-btn" data-act="del-place" aria-label="Remove place ' + (k + 1) + '">×</button>' : '') + '</div>' +
+      '<div class="sizes">' + pl.sizes.map(function (z, j) { return sizeRow(pl, z, j); }).join('') + '</div>' +
+      '<div class="p-foot"><button type="button" class="btn add-size" data-act="add-size">+ Add size</button><span class="g-sub" data-psub></span></div>' +
+      '</div>';
+  }
+  function glassBlock(g, i) {
+    var p = 'g-' + g.id + '-';
+    return '<div class="glass" data-id="' + g.id + '">' +
+      '<div class="card-head"><span class="tag"><b class="num">' + (i + 1) + '</b>Glass ' + (i + 1) + '</span>' +
+      (st.items.length > 1 ? '<button type="button" class="btn danger" data-act="del-glass" aria-label="Remove glass ' + (i + 1) + '">Remove</button>' : '') + '</div>' +
+      '<div class="g-top"><label for="' + p + 'desc">Description<input id="' + p + 'desc" data-f="desc" placeholder="10mm clear tempered glass"></label>' +
+      '<label for="' + p + 'unit">Size unit<select id="' + p + 'unit" data-f="unit">' +
+      UNITS.map(function (u) { return '<option value="' + u[0] + '">' + u[1] + '</option>'; }).join('') + '</select></label></div>' +
+      '<div class="places">' + g.places.map(function (pl, k) { return placeBlock(g, pl, k); }).join('') + '</div>' +
+      '<div class="g-foot"><button type="button" class="btn add-size" data-act="add-place">+ Add where it goes</button><span class="g-sub" data-gsub></span></div>' +
+      '</div>';
+  }
+  function plural(n, w) { return n + ' ' + w + (n === 1 ? '' : 's'); }
+  function paintGlass(el, g) {
+    g.places.forEach(function (pl) {
+      var pel = el.querySelector('.place[data-pid="' + pl.id + '"]');
+      pl.sizes.forEach(function (z) {
+        pel.querySelector('.size[data-zid="' + z.id + '"] [data-zamt]').textContent = pes(z.rate) ? cedi(sizeTotal(z)) : '—';
+      });
+      pel.querySelector('[data-psub]').textContent = (pl.ref || 'This place') + ' · ' + cedi(placeTotal(pl));
+    });
+    el.querySelector('[data-gsub]').textContent = plural(usedPlaces(g).length, 'place') + ' · ' + plural(sum(g.places, function (pl) { return usedSizes(pl).length; }), 'size') + ' · ' + cedi(itemTotal(g));
+  }
+  function renderGlass(focusId) {
+    var box = $('items');
+    box.innerHTML = st.items.map(glassBlock).join('');
+    st.items.forEach(function (g) {
+      var el = box.querySelector('.glass[data-id="' + g.id + '"]');
+      el.querySelector('[data-f="desc"]').value = g.desc; el.querySelector('[data-f="unit"]').value = g.unit;
+      g.places.forEach(function (pl) {
+        var pel = el.querySelector('.place[data-pid="' + pl.id + '"]');
+        pel.querySelector('[data-f="ref"]').value = pl.ref;
+        pl.sizes.forEach(function (z) {
+          pel.querySelectorAll('.size[data-zid="' + z.id + '"] [data-f]').forEach(function (inp) { inp.value = z[inp.dataset.f] || ''; });
+        });
+      });
+      paintGlass(el, g);
+    });
+    if (focusId) { var f = $(focusId); f.focus(); f.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+  }
+  // Works out which glass, place and size a field or button belongs to.
+  function locate(node) {
+    var el = node.closest('.glass'), pel = node.closest('.place'), zel = node.closest('.size');
+    var g = st.items.find(function (x) { return x.id === el.dataset.id; });
+    var pl = pel && g.places.find(function (x) { return x.id === pel.dataset.pid; });
+    var z = zel && pl.sizes.find(function (x) { return x.id === zel.dataset.zid; });
+    return { el: el, g: g, pl: pl, z: z };
+  }
+  function updGlass(e) {
+    var f = e.target.dataset.f; if (!f) return;
+    var o = locate(e.target);
+    (o.z || o.pl || o.g)[f] = e.target.value;
+    paintGlass(o.el, o.g); refresh();
+  }
+  $('items').addEventListener('input', updGlass);
+  $('items').addEventListener('change', updGlass);
+  $('items').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-act]'); if (!b) return;
+    var o = locate(b), act = b.dataset.act;
+    if (act === 'add-size') {
+      var z = blankSize(); o.pl.sizes.push(z);
+      renderGlass('g-' + z.id + '-w'); $('live').textContent = 'Size ' + o.pl.sizes.length + ' added.';
+    } else if (act === 'del-size') {
+      o.pl.sizes = o.pl.sizes.filter(function (x) { return x !== o.z; });
+      renderGlass(); $('live').textContent = 'Size removed.';
+    } else if (act === 'add-place') {
+      var pl = blankPlace(); o.g.places.push(pl);
+      renderGlass('g-' + pl.id + '-ref'); $('live').textContent = 'Place ' + o.g.places.length + ' added.';
+    } else if (act === 'del-place') {
+      o.g.places = o.g.places.filter(function (x) { return x !== o.pl; });
+      renderGlass(); $('live').textContent = 'Place removed.';
+    } else if (act === 'del-glass') {
+      st.items = st.items.filter(function (x) { return x !== o.g; });
+      renderGlass(); $('live').textContent = 'Glass removed.';
+    }
+    refresh();
+  });
+  // A new glass keeps the unit of the one before, because a job is usually measured in one unit.
+  $('addItem').addEventListener('click', function () {
+    var prev = st.items[st.items.length - 1], g = blankItem();
+    if (prev) g.unit = prev.unit;
+    st.items.push(g); renderGlass('g-' + g.id + '-desc'); refresh();
+    $('live').textContent = 'Glass ' + st.items.length + ' added.';
+  });
+
+  /* ---------- accessory cards ---------- */
+  // Accessories are drawn as cards. Only the card being typed in is repainted, so the keyboard never loses focus.
   var LISTS = {
-    items: {
-      box: 'items', label: 'Glass item', make: blankItem, removable: function () { return st.items.length > 1; },
-      html: function (it, i, p) {
-        return '<label for="' + p + 'desc">Description<input id="' + p + 'desc" data-f="desc" placeholder="10mm clear tempered glass"></label>' +
-          '<label for="' + p + 'ref">Client\'s ref (where it goes)<input id="' + p + 'ref" data-f="ref" placeholder="Bathroom"></label>' +
-          '<div class="grid3"><label for="' + p + 'w">Width<input id="' + p + 'w" data-f="w" inputmode="decimal" placeholder="750"></label>' +
-          '<label for="' + p + 'h">Height<input id="' + p + 'h" data-f="h" inputmode="decimal" placeholder="2100"></label>' +
-          '<label for="' + p + 'unit">Unit<select id="' + p + 'unit" data-f="unit"><option value="mm">mm</option><option value="cm">cm</option><option value="in">inches</option><option value="ft">feet</option></select></label></div>' +
-          '<div class="grid"><label for="' + p + 'rate">Price each (GH₵)<input id="' + p + 'rate" data-f="rate" inputmode="decimal" placeholder="0.00"></label>' +
-          '<label for="' + p + 'qty">Quantity<input id="' + p + 'qty" data-f="qty" type="number" inputmode="numeric" min="1" step="1"></label></div>';
-      },
-      paint: function (el, it) {
-        el.querySelector('[data-calc]').textContent = calcLine(it);
-        el.querySelector('[data-amt]').textContent = cedi(itemTotal(it));
-      }
-    },
     accs: {
       box: 'accs', label: 'Accessory', make: blankAcc, removable: function () { return true; },
       html: function (o, i, p) {
@@ -117,7 +242,7 @@
     st[listName].forEach(function (o, i) { box.appendChild(makeCard(listName, o, i, o.id === newId)); });
     if (listName === 'accs') $('noAcc').hidden = st.accs.length > 0;
   }
-  function renderAllLists() { renderList('items'); renderList('accs'); }
+  function renderAllLists() { renderGlass(); renderList('accs'); }
 
   // One set of event handlers per list, listening on the list's container (cards come and go).
   Object.keys(LISTS).forEach(function (listName) {
@@ -139,16 +264,13 @@
       }
     });
   });
-  // The "+ Add" buttons: a new empty card, focused and scrolled into view. A new glass card copies the
-  // unit, pricing and client's ref from the one before, because jobs usually repeat them.
+  // The "+ Add accessory" button: a new empty card, focused and scrolled into view.
   function addTo(listName) {
-    var o = LISTS[listName].make(), prev = st[listName][st[listName].length - 1];
-    if (listName === 'items' && prev) { o.unit = prev.unit; o.ref = prev.ref; }
+    var o = LISTS[listName].make();
     st[listName].push(o); renderList(listName, o.id); refresh();
     $('live').textContent = LISTS[listName].label + ' ' + st[listName].length + ' added.';
     var inp = $(listName + '-' + o.id + '-desc'); inp.focus(); inp.scrollIntoView({ block: 'center', behavior: 'smooth' });
   }
-  $('addItem').addEventListener('click', function () { addTo('items'); });
   $('addAcc').addEventListener('click', function () { addTo('accs'); });
 
   /* ---------- summary ---------- */
@@ -174,7 +296,16 @@
     L.push(''); L.push('*QUOTATION* Ref ' + st.no + ' · ' + niceDate(st.date));
     if (st.client.name) L.push('Client: ' + st.client.name + (st.client.phone ? ' · ' + st.client.phone : ''));
     var g = filled(st.items, itemTotal);
-    if (g.length) { L.push(''); L.push('*Glass*'); g.forEach(function (it, i) { L.push((i + 1) + '. ' + (it.desc || 'Glass') + (it.ref ? ' (' + it.ref + ')' : '')); L.push('   ' + [size(it), calcLine(it)].filter(Boolean).join(' · ') + ' = ' + cedi(itemTotal(it))); }); }
+    if (g.length) {
+      L.push(''); L.push('*Glass*');
+      g.forEach(function (gl, i) {
+        L.push((i + 1) + '. ' + (gl.desc || 'Glass'));
+        usedPlaces(gl).forEach(function (pl) {
+          if (pl.ref) L.push('   _' + pl.ref + '_');
+          usedSizes(pl).forEach(function (z) { L.push('   • ' + [size(z, gl.unit), calcLine(z)].filter(Boolean).join(' · ') + ' = ' + cedi(sizeTotal(z))); });
+        });
+      });
+    }
     var a = filled(st.accs, lineTotal);
     if (a.length) { L.push(''); L.push('*Accessories*'); a.forEach(function (o, i) { L.push((i + 1) + '. ' + (o.desc || 'Accessory') + (o.code ? ' [' + o.code + ']' : '') + ': ' + fmtN(qty(o)) + ' ' + o.per + ' × ' + cedi(pes(o.rate)) + ' = ' + cedi(lineTotal(o))); }); }
     L.push('');
@@ -270,12 +401,24 @@
 
     var gl = filled(st.items, itemTotal);
     var units = Array.from(new Set(gl.map(function (i) { return i.unit; }))), uh = units.length === 1 ? ' ' + units[0] : '';
-    var grows = gl.map(function (it) {
-      return '<tr><td>' + esc(it.ref) + '</td><td><span class="desc">' + esc(it.desc || 'Glass') + '</span></td><td class="c">' + esc(parseFloat(it.w) ? it.w : '') + '</td><td class="c">' + esc(parseFloat(it.h) ? it.h : '') + '</td><td class="c">' + fmtN(qty(it)) +
-        '</td><td class="r">' + money(pes(it.rate)) + '</td><td class="r">' + money(itemTotal(it)) + '</td></tr>';
+    // One group of rows per glass: the description is written once beside all of its sizes, and each place
+    // (client's ref) once beside its own sizes.
+    var gbodies = gl.map(function (g) {
+      var rows = [];
+      usedPlaces(g).forEach(function (pl) {
+        var zs = usedSizes(pl); if (!zs.length) zs = [blankSize()];
+        zs.forEach(function (z, j) { rows.push({ pl: pl, z: z, first: j === 0, span: zs.length }); });
+      });
+      if (!rows.length) rows.push({ pl: blankPlace(), z: blankSize(), first: true, span: 1 });
+      return '<tbody>' + rows.map(function (r, i) {
+        var z = r.z;
+        return '<tr>' + (i ? '' : '<td rowspan="' + rows.length + '"><span class="desc">' + esc(g.desc || 'Glass') + '</span></td>') +
+          (r.first ? '<td rowspan="' + r.span + '">' + esc(r.pl.ref) + '</td>' : '') + '<td class="c">' + esc(parseFloat(z.w) ? z.w : '') + '</td><td class="c">' + esc(parseFloat(z.h) ? z.h : '') + '</td><td class="c">' + fmtN(qty(z)) +
+          '</td><td class="r">' + money(pes(z.rate)) + '</td><td class="r">' + money(sizeTotal(z)) + '</td></tr>';
+      }).join('') + '</tbody>';
     }).join('');
-    var glassT = '<div class="s-title">QUOTATION</div><table><thead><tr><th style="width:14%">Client\'s ref</th><th>Description</th><th class="c" style="width:9%">Width (W)' + uh + '</th><th class="c" style="width:9%">Height (H)' + uh + '</th><th class="c" style="width:7%">Qty</th><th class="r" style="width:13%">Price each</th><th class="r" style="width:14%">Amount</th></tr></thead><tbody>' +
-      (grows || '<tr><td colspan="7">&nbsp;</td></tr>') + '</tbody></table><div class="s-tot"><div><span>Sub total (glass)</span><span>' + money(t.glass) + '</span></div></div>';
+    var glassT = '<div class="s-title">QUOTATION</div><table class="s-glass"><thead><tr><th>Description</th><th style="width:14%">Client\'s ref</th><th class="c" style="width:9%">Width (W)' + uh + '</th><th class="c" style="width:9%">Height (H)' + uh + '</th><th class="c" style="width:7%">Qty</th><th class="r" style="width:13%">Price each</th><th class="r" style="width:14%">Amount</th></tr></thead>' +
+      (gbodies || '<tbody><tr><td colspan="7">&nbsp;</td></tr></tbody>') + '</table><div class="s-tot"><div><span>Sub total (glass)</span><span>' + money(t.glass) + '</span></div></div>';
 
     var ac = filled(st.accs, lineTotal);
     var accT = ac.length ? '<div class="s-sec">ACCESSORIES</div><table><thead><tr><th style="width:16%">Code</th><th>Description</th><th class="c" style="width:7%">Qty</th><th style="width:8%">Per</th><th class="r" style="width:12%">Rate</th><th class="r" style="width:13%">Amount</th></tr></thead><tbody>' +
@@ -330,7 +473,7 @@
     var o = e.target.closest('[data-open]'), d = e.target.closest('[data-del]');
     if (o) {
       var x = savedList().find(function (s) { return s.no === o.dataset.open; });
-      if (x) { st = JSON.parse(JSON.stringify(x.data)); fillFixed(); renderAllLists(); setView('edit'); refresh(); }
+      if (x) { st = fixGlass(JSON.parse(JSON.stringify(x.data))); fillFixed(); renderAllLists(); setView('edit'); refresh(); }
     } else if (d) {
       // Deleting needs two taps, so one slip of the finger never loses a quotation.
       if (pendingDelete === d.dataset.del) { save(SAVED, savedList().filter(function (s) { return s.no !== d.dataset.del; })); pendingDelete = null; }
@@ -409,6 +552,7 @@
   /* ---------- refresh after every change ---------- */
   function refresh() {
     renderSummary(); updateWa();
+    $('glassTotal').textContent = cedi(totals().glass);
     $('refLabel').textContent = st.no;
     $('savedTag').hidden = !isSaved();
     $('bizSummary').textContent = biz.name || 'Add your company details';

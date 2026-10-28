@@ -3,9 +3,9 @@
 An installable app (PWA) for making glazing quotations on a laptop or an Android phone. It works offline once installed.
 
 - **Company details** (name, phone, WhatsApp, email, location, logo, terms) are typed once and saved on the device.
-- **Client details**, then cards that are added one at a time with **+ Add**:
-  - **Glass:** description, client's ref, width × height (mm, cm, inches or feet), quantity and the owner's own price for each item
-  - **Accessories:** code, description, qty, per (pcs, pairs, length…), rate
+- **Client details**, then:
+  - **Glass:** one card. Each glass (description and size unit: mm, cm, inches or feet) goes to one or more places ("where it goes", e.g. Bathroom), and each place has its own sizes: width × height, quantity and the owner's own price. **+ Add size** adds a size to that place; **+ Add where it goes** adds another place for that glass; **+ Add another glass** adds the next glass.
+  - **Accessories:** cards added with **+ Add accessory**: code, description, qty, per (pcs, pairs, length…), rate
 - Labour, discount (% or GH₵), deposit and balance.
 - **View quotation** shows the quotation sheet; **Print / Save PDF** prints it on A4 or saves it as a PDF.
 - **Send on WhatsApp** sends the quotation as a picture through the phone's share menu (on a laptop it saves the picture and opens the client's chat). **Save as picture** just saves it.

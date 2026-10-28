@@ -119,6 +119,35 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--edge);bo
 .add{border:1.5px dashed var(--line-strong);background:transparent;color:var(--edge-ink);font-size:15px;min-height:52px}
 .add:hover{border-color:var(--edge);background:var(--edge-soft)}
 
+/* ----- Glass card: several glass items; each goes to one or more places, each place has its own sizes ----- */
+.glass-card{container-type:inline-size}
+.glass{display:flex;flex-direction:column;gap:12px}
+.glass+.glass{border-top:1px dashed var(--line-strong);padding-top:18px;margin-top:4px}
+.g-top{display:grid;grid-template-columns:minmax(0,1fr) 92px;gap:10px}
+.places{display:flex;flex-direction:column;gap:10px}
+.place{display:flex;flex-direction:column;gap:10px;padding:12px;background:var(--bg);border:1px solid var(--line);border-radius:12px}
+.p-head{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end}
+.sizes{display:flex;flex-direction:column;gap:10px}
+/* Phone: each size on two lines, separated by a dashed line. */
+.size{display:grid;grid-template-columns:repeat(3,minmax(0,1fr)) 32px;grid-template-areas:"w h qty del" "rate rate amt amt";gap:8px 10px;align-items:end}
+.size+.size{border-top:1px dashed var(--line-strong);padding-top:10px}
+.z-w{grid-area:w}.z-h{grid-area:h}.z-qty{grid-area:qty}.z-rate{grid-area:rate}
+.z-amt{grid-area:amt;text-align:right;font-weight:700;line-height:46px;white-space:nowrap}
+.x-btn{width:32px;height:32px;margin-bottom:7px;border-radius:999px;border:0;background:transparent;color:var(--danger);font-size:20px;line-height:1;cursor:pointer}
+.x-btn:hover{background:var(--danger-soft)}
+.x-btn:focus-visible{outline:none;box-shadow:var(--ring)}
+.z-del{grid-area:del;justify-self:end}
+.p-foot,.g-foot{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.add-size{min-height:40px;font-size:14px;padding:6px 14px;border:1.5px dashed var(--line-strong);background:transparent;color:var(--edge-ink)}
+.add-size:hover{border-color:var(--edge);background:var(--edge-soft)}
+.g-sub{font-size:13px;color:var(--muted)}
+/* Wider card: each size on one line, with the labels shown once above the first line. */
+@container (min-width:600px){
+  .size{grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,.7fr) minmax(0,1.2fr) minmax(104px,1fr) 32px;grid-template-areas:"w h qty rate amt del"}
+  .size+.size{border-top:0;padding-top:0}
+  .size+.size .lbl{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+}
+
 /* ----- Summary ----- */
 .sum-row{display:flex;justify-content:space-between;gap:12px;font-size:14px;color:var(--muted)}
 .sum-row .num{color:var(--ink);font-weight:550}
@@ -176,7 +205,8 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--edge);bo
 .sheet table{width:100%;border-collapse:collapse;font-size:12px}
 .sheet th{background:var(--sheet-head);color:#FFFFFF;font-size:9.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:7px 8px;text-align:left;vertical-align:bottom}
 .sheet td{border-bottom:1px solid var(--sheet-line);padding:7px 8px;vertical-align:top}
-.sheet tbody tr:nth-child(even) td{background:#FAFBFB}
+.sheet table:not(.s-glass) tbody tr:nth-child(even) td{background:#FAFBFB}
+.s-glass tbody:nth-of-type(even) td{background:#FAFBFB}
 .sheet .r{text-align:right}
 .sheet .c{text-align:center}
 .sheet .desc{font-weight:700;text-transform:uppercase;font-size:11.5px}
@@ -202,7 +232,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--edge);bo
   #sheetView{display:block!important;max-width:none}
   .frame{height:auto!important;overflow:visible;box-shadow:none;border-radius:0}
   .sheet{transform:none!important;width:100%;padding:18px 0 0}
-  .sheet tr{break-inside:avoid}
+  .sheet tr,.s-glass tbody{break-inside:avoid}
   .s-head{padding-bottom:12px}
   .s-client{margin-top:12px;padding:10px 14px}
   .s-title{margin:16px 0 8px}

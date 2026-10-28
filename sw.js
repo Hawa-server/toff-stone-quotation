@@ -1,6 +1,6 @@
 /* Service worker: keeps a copy of the app's files on the device, so the app opens and works without internet.
    When you change any file, raise VERSION (v1 -> v2) so phones and laptops download the new files. */
-const VERSION = 'tsq-v5';
+const VERSION = 'tsq-v7';
 const FILES = [
   './',
   'index.html',
